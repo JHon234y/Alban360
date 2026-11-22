@@ -1,0 +1,6 @@
+{
+  "name": "Albán Café 360°",
+  "description": "Plataforma integral para caficultores de San José de Albán, Nariño: fincas con QR, mapa satelital, cosechas, bitácora de cultivo, costos, precios y asesoría agronómica.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

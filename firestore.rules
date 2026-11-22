@@ -1,0 +1,568 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function expectedRoleLabel(roleId) {
+      return roleId == 'caficultor' ? 'Caficultor' :
+             roleId == 'agronomo' ? 'Ingeniero agrónomo' :
+             roleId == 'comprador' ? 'Comprador' :
+             roleId == 'proveedor' ? 'Proveedor' : '';
+    }
+
+    function legacyRoleToId(roleName) {
+      return roleName == 'Caficultor' ? 'caficultor' :
+             roleName == 'Ingeniero agrónomo' ? 'agronomo' :
+             roleName == 'Comprador' ? 'comprador' :
+             roleName == 'Proveedor' ? 'proveedor' : '';
+    }
+
+    function callerRoleId() {
+      return exists(userDocPath())
+        ? ('roleId' in get(userDocPath()).data
+             ? get(userDocPath()).data.roleId
+             : legacyRoleToId(get(userDocPath()).data.role))
+        : '';
+    }
+
+    function hasRole(roleId) {
+      return isSignedIn() && callerRoleId() == roleId;
+    }
+
+    function isValidRolePermissions(perms, roleId) {
+      return perms is map &&
+             perms.keys().hasAll([
+               'manageOwnFarms', 'logOwnCropActivities', 'recordOwnHarvests',
+               'calculateOwnCosts', 'manageCollectors', 'createInquiries',
+               'registerAgronomyVisits', 'replyInquiries',
+               'publishProviderCatalog', 'publishBuyerPrices',
+               'recordCoffeePrices', 'viewCommunity'
+             ]) &&
+             perms.keys().hasOnly([
+               'manageOwnFarms', 'logOwnCropActivities', 'recordOwnHarvests',
+               'calculateOwnCosts', 'manageCollectors', 'createInquiries',
+               'registerAgronomyVisits', 'replyInquiries',
+               'publishProviderCatalog', 'publishBuyerPrices',
+               'recordCoffeePrices', 'viewCommunity'
+             ]) &&
+             perms.viewCommunity == true &&
+             perms.manageOwnFarms == (roleId == 'caficultor') &&
+             perms.logOwnCropActivities == (roleId == 'caficultor') &&
+             perms.recordOwnHarvests == (roleId == 'caficultor') &&
+             perms.calculateOwnCosts == (roleId == 'caficultor') &&
+             perms.manageCollectors == (roleId == 'caficultor') &&
+             perms.createInquiries == (roleId == 'caficultor') &&
+             perms.registerAgronomyVisits == (roleId == 'agronomo') &&
+             perms.replyInquiries == (roleId == 'agronomo') &&
+             perms.publishProviderCatalog == (roleId == 'proveedor') &&
+             perms.publishBuyerPrices == (roleId == 'comprador') &&
+             perms.recordCoffeePrices == (roleId == 'caficultor' || roleId == 'comprador');
+    }
+
+    function isOptString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isOptNonNegNumber(data, key) {
+      return !(key in data) || (data[key] is number && data[key] >= 0);
+    }
+
+    function isOptGeo(data) {
+      return (!('latitude' in data) && !('longitude' in data)) ||
+             (('latitude' in data) && ('longitude' in data) &&
+              data.latitude is number && data.latitude >= -90 && data.latitude <= 90 &&
+              data.longitude is number && data.longitude >= -180 && data.longitude <= 180);
+    }
+
+    function hasValidTimestamps(data) {
+      return data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidFincaProfile(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordType in ['finca', 'caficultor'] &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.location is string && data.location.size() >= 1 && data.location.size() <= 180 &&
+             isOptString(data, 'ownerName', 120) &&
+             isOptString(data, 'subtitle', 180) &&
+             isOptString(data, 'relatedCode', 60) &&
+             isOptNonNegNumber(data, 'areaHectares') &&
+             isOptString(data, 'details', 500) &&
+             isOptGeo(data) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidPublicFinca(data) {
+      return data.isPublic == true && isValidFincaProfile(data);
+    }
+
+    function isValidCosechaRecord(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.workerName is string && data.workerName.size() >= 1 && data.workerName.size() <= 120 &&
+             data.farmCode is string && data.farmCode.size() >= 1 && data.farmCode.size() <= 60 &&
+             data.date is string && data.date.size() >= 1 && data.date.size() <= 20 &&
+             data.quantityKg is number && data.quantityKg > 0 &&
+             isOptString(data, 'farmName', 120) &&
+             isOptString(data, 'details', 500) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidCultivoActivity(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.activityType in ['Siembra', 'Abono', 'Poda', 'Control fitosanitario', 'Cosecha'] &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.farmCode is string && data.farmCode.size() >= 1 && data.farmCode.size() <= 60 &&
+             data.date is string && data.date.size() >= 1 && data.date.size() <= 20 &&
+             isOptString(data, 'farmId', 128) &&
+             isOptString(data, 'farmName', 120) &&
+             isOptString(data, 'authorName', 120) &&
+             isOptString(data, 'startTime', 10) &&
+             isOptString(data, 'endTime', 10) &&
+             isOptNonNegNumber(data, 'quantity') &&
+             isOptString(data, 'details', 500) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidPublicCultivo(data) {
+      return data.isPublic == true && isValidCultivoActivity(data);
+    }
+
+    function isValidCostoCalculation(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.date is string && data.date.size() >= 1 && data.date.size() <= 20 &&
+             data.estimatedKg is number && data.estimatedKg >= 0 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.lines is list && data.lines.size() >= 1 && data.lines.size() <= 30 &&
+             data.lines[0] is map &&
+             isOptString(data, 'farmCode', 60) &&
+             isOptString(data, 'farmName', 120) &&
+             isOptNonNegNumber(data, 'offerPricePerKg') &&
+             isOptString(data, 'details', 1000) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidVisitaAgronomica(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.engineerName is string && data.engineerName.size() >= 1 && data.engineerName.size() <= 120 &&
+             data.diagnosis is string && data.diagnosis.size() >= 1 && data.diagnosis.size() <= 240 &&
+             data.date is string && data.date.size() >= 1 && data.date.size() <= 20 &&
+             isOptString(data, 'farmId', 128) &&
+             isOptString(data, 'farmCode', 60) &&
+             isOptString(data, 'farmName', 120) &&
+             isOptString(data, 'farmOwnerId', 128) &&
+             isOptString(data, 'farmOwnerName', 120) &&
+             isOptString(data, 'location', 180) &&
+             isOptString(data, 'activitiesPerformed', 600) &&
+             isOptString(data, 'recommendations', 600) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidPublicVisita(data) {
+      return data.isPublic == true && isValidVisitaAgronomica(data);
+    }
+
+    function isValidInquietud(data) {
+      return data.isPublic == true &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 120 &&
+             data.authorRole is string && data.authorRole.size() >= 1 && data.authorRole.size() <= 60 &&
+             data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 140 &&
+             data.question is string && data.question.size() >= 3 && data.question.size() <= 800 &&
+             data.status in ['abierta', 'respondida'] &&
+             data.date is string && data.date.size() >= 1 && data.date.size() <= 20 &&
+             isOptString(data, 'farmId', 128) &&
+             isOptString(data, 'farmCode', 60) &&
+             isOptString(data, 'farmName', 120) &&
+             isOptString(data, 'replyText', 800) &&
+             isOptString(data, 'replyByUid', 128) &&
+             isOptString(data, 'replyByName', 120) &&
+             isOptString(data, 'replyDate', 20) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidRecolectorPostulacion(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.contactName is string && data.contactName.size() >= 1 && data.contactName.size() <= 100 &&
+             data.contactEmail is string && data.contactEmail.size() >= 3 && data.contactEmail.size() <= 120 &&
+             data.contactPhone is string && data.contactPhone.size() >= 5 && data.contactPhone.size() <= 30 &&
+             data.location is string && data.location.size() >= 1 && data.location.size() <= 100 &&
+             data.experience is string && data.experience.size() >= 1 && data.experience.size() <= 60 &&
+             data.availability is string && data.availability.size() >= 1 && data.availability.size() <= 180 &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidProveedor(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.isPublic == true &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             data.productsServices is string && data.productsServices.size() >= 1 && data.productsServices.size() <= 300 &&
+             isOptString(data, 'ownerName', 120) &&
+             isOptString(data, 'category', 80) &&
+             isOptString(data, 'priceReference', 100) &&
+             isOptString(data, 'commercialContact', 100) &&
+             isOptString(data, 'location', 180) &&
+             isOptString(data, 'details', 500) &&
+             isOptGeo(data) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidComprador(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.isPublic == true &&
+             data.actorType in ['comprador', 'vendedor'] &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+             isOptString(data, 'purchaseType', 180) &&
+             isOptNonNegNumber(data, 'offerAmountCop') &&
+             isOptString(data, 'priceUnit', 40) &&
+             isOptString(data, 'priceDate', 20) &&
+             isOptString(data, 'location', 180) &&
+             isOptString(data, 'details', 500) &&
+             isOptGeo(data) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidPrecioCafe(data) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.recordCode is string && data.recordCode.size() >= 1 && data.recordCode.size() <= 40 &&
+             data.date is string && data.date.size() >= 1 && data.date.size() <= 20 &&
+             data.source is string && data.source.size() >= 1 && data.source.size() <= 60 &&
+             data.pricePerCargaCop is number && data.pricePerCargaCop > 0 &&
+             data.pricePerKgCop is number && data.pricePerKgCop > 0 &&
+             isOptNonNegNumber(data, 'nyFuturesCentsLb') &&
+             isOptNonNegNumber(data, 'usdCopTrm') &&
+             isOptString(data, 'notes', 400) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidUserProfileBase(data, userId) {
+      return data.userId is string && data.userId == request.auth.uid &&
+             data.userId == userId &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120 &&
+             data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30 &&
+             data.location is string && data.location.size() >= 1 && data.location.size() <= 150 &&
+             data.role in ['Caficultor', 'Ingeniero agrónomo', 'Comprador', 'Proveedor'] &&
+             isOptString(data, 'email', 150) &&
+             isOptString(data, 'farmName', 120) &&
+             hasValidTimestamps(data);
+    }
+
+    function isValidUserProfileCreate(data, userId) {
+      return isValidUserProfileBase(data, userId) &&
+             data.roleId in ['caficultor', 'agronomo', 'comprador', 'proveedor'] &&
+             data.role == expectedRoleLabel(data.roleId) &&
+             data.roleLocked == true &&
+             isValidRolePermissions(data.permissions, data.roleId);
+    }
+
+    // --- ROLE CATALOG (READ-ONLY FOR SIGNED-IN USERS, NO CLIENT WRITES) ---
+
+    match /roles/{roleId} {
+      allow get: if isSignedIn() && isValidId(roleId);
+      allow list: if isSignedIn() && existing().isActive == true;
+      allow write: if false;
+    }
+
+    // --- USER-SCOPED PRIVATE COLLECTIONS (PII & STRICT ROLE-SCOPED FARM OPERATIONS) ---
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) &&
+                       incoming().keys().hasAll(['userId', 'fullName', 'phone', 'location', 'roleId', 'role', 'roleLocked', 'permissions', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'fullName', 'email', 'phone', 'location', 'roleId', 'role', 'roleLocked', 'permissions', 'farmName', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfileCreate(incoming(), userId);
+      allow update: if isOwner(userId) &&
+                       isValidUserProfileBase(incoming(), userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'email', 'phone', 'location', 'farmName', 'updatedAt']);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/fincas/{fincaId} {
+      allow get: if isOwner(userId) && isValidId(fincaId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(fincaId) &&
+                       incoming().keys().hasAll(['userId', 'recordType', 'recordCode', 'name', 'location', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'ownerName', 'recordType', 'recordCode', 'name', 'subtitle', 'location', 'relatedCode', 'areaHectares', 'details', 'latitude', 'longitude', 'createdAt', 'updatedAt']) &&
+                       isValidFincaProfile(incoming()) &&
+                       hasRole('caficultor');
+      allow update: if isOwner(userId) && isValidId(fincaId) &&
+                       isValidFincaProfile(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['ownerName', 'recordType', 'recordCode', 'name', 'subtitle', 'location', 'relatedCode', 'areaHectares', 'details', 'latitude', 'longitude', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isOwner(userId) && isValidId(fincaId) && hasRole('caficultor');
+    }
+
+    match /users/{userId}/cosechas/{cosechaId} {
+      allow get: if isOwner(userId) && isValidId(cosechaId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(cosechaId) &&
+                       incoming().keys().hasAll(['userId', 'recordCode', 'workerName', 'farmCode', 'date', 'quantityKg', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'recordCode', 'workerName', 'farmCode', 'farmName', 'date', 'quantityKg', 'details', 'createdAt', 'updatedAt']) &&
+                       isValidCosechaRecord(incoming()) &&
+                       hasRole('caficultor');
+      allow update: if isOwner(userId) && isValidId(cosechaId) &&
+                       isValidCosechaRecord(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['workerName', 'farmCode', 'farmName', 'date', 'quantityKg', 'details', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isOwner(userId) && isValidId(cosechaId) && hasRole('caficultor');
+    }
+
+    match /users/{userId}/cultivos/{cultivoId} {
+      allow get: if isOwner(userId) && isValidId(cultivoId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(cultivoId) &&
+                       incoming().keys().hasAll(['userId', 'recordCode', 'activityType', 'name', 'farmCode', 'date', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'recordCode', 'activityType', 'name', 'farmId', 'farmCode', 'farmName', 'authorName', 'date', 'startTime', 'endTime', 'quantity', 'details', 'createdAt', 'updatedAt']) &&
+                       isValidCultivoActivity(incoming()) &&
+                       hasRole('caficultor');
+      allow update: if isOwner(userId) && isValidId(cultivoId) &&
+                       isValidCultivoActivity(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['activityType', 'name', 'farmId', 'farmCode', 'farmName', 'authorName', 'date', 'startTime', 'endTime', 'quantity', 'details', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isOwner(userId) && isValidId(cultivoId) && hasRole('caficultor');
+    }
+
+    match /users/{userId}/costos/{costoId} {
+      allow get: if isOwner(userId) && isValidId(costoId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(costoId) &&
+                       incoming().keys().hasAll(['userId', 'recordCode', 'name', 'date', 'estimatedKg', 'totalAmount', 'lines', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'recordCode', 'name', 'farmCode', 'farmName', 'date', 'estimatedKg', 'offerPricePerKg', 'totalAmount', 'lines', 'details', 'createdAt', 'updatedAt']) &&
+                       isValidCostoCalculation(incoming()) &&
+                       hasRole('caficultor');
+      allow update: if isOwner(userId) && isValidId(costoId) &&
+                       isValidCostoCalculation(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name', 'farmCode', 'farmName', 'date', 'estimatedKg', 'offerPricePerKg', 'totalAmount', 'lines', 'details', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isOwner(userId) && isValidId(costoId) && hasRole('caficultor');
+    }
+
+    match /users/{userId}/visitas_agronomicas/{visitaId} {
+      allow get: if isOwner(userId) && isValidId(visitaId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(visitaId) &&
+                       incoming().keys().hasAll(['userId', 'recordCode', 'engineerName', 'diagnosis', 'date', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'recordCode', 'engineerName', 'farmId', 'farmCode', 'farmName', 'farmOwnerId', 'farmOwnerName', 'location', 'date', 'diagnosis', 'activitiesPerformed', 'recommendations', 'createdAt', 'updatedAt']) &&
+                       isValidVisitaAgronomica(incoming()) &&
+                       hasRole('agronomo');
+      allow update: if isOwner(userId) && isValidId(visitaId) &&
+                       isValidVisitaAgronomica(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['engineerName', 'farmId', 'farmCode', 'farmName', 'farmOwnerId', 'farmOwnerName', 'location', 'date', 'diagnosis', 'activitiesPerformed', 'recommendations', 'updatedAt']) &&
+                       hasRole('agronomo');
+      allow delete: if isOwner(userId) && isValidId(visitaId) && hasRole('agronomo');
+    }
+
+    match /users/{userId}/recolectores/{recolectorId} {
+      allow get: if isOwner(userId) && isValidId(recolectorId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(recolectorId) &&
+                       incoming().keys().hasAll(['userId', 'recordCode', 'contactName', 'contactEmail', 'contactPhone', 'location', 'experience', 'availability', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'recordCode', 'contactName', 'contactEmail', 'contactPhone', 'location', 'experience', 'availability', 'createdAt', 'updatedAt']) &&
+                       isValidRecolectorPostulacion(incoming()) &&
+                       hasRole('caficultor');
+      allow update: if isOwner(userId) && isValidId(recolectorId) &&
+                       isValidRecolectorPostulacion(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['contactName', 'contactEmail', 'contactPhone', 'location', 'experience', 'availability', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isOwner(userId) && isValidId(recolectorId) && hasRole('caficultor');
+    }
+
+    match /users/{userId}/precios_cafe/{precioId} {
+      allow get: if isOwner(userId) && isValidId(precioId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(precioId) &&
+                       incoming().keys().hasAll(['userId', 'recordCode', 'date', 'source', 'pricePerCargaCop', 'pricePerKgCop', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'recordCode', 'date', 'source', 'pricePerCargaCop', 'pricePerKgCop', 'nyFuturesCentsLb', 'usdCopTrm', 'notes', 'createdAt', 'updatedAt']) &&
+                       isValidPrecioCafe(incoming()) &&
+                       (hasRole('caficultor') || hasRole('comprador'));
+      allow update: if isOwner(userId) && isValidId(precioId) &&
+                       isValidPrecioCafe(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['date', 'source', 'pricePerCargaCop', 'pricePerKgCop', 'nyFuturesCentsLb', 'usdCopTrm', 'notes', 'updatedAt']) &&
+                       (hasRole('caficultor') || hasRole('comprador'));
+      allow delete: if isOwner(userId) && isValidId(precioId) && (hasRole('caficultor') || hasRole('comprador'));
+    }
+
+    // --- SHARED COMMUNITY COLLECTIONS (READABLE BY ALL SIGNED-IN ROLES, STRICT ROLE-LOCKED WRITES) ---
+
+    match /fincas/{fincaId} {
+      allow get: if isSignedIn() && isValidId(fincaId) && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(fincaId) &&
+                       incoming().keys().hasAll(['userId', 'isPublic', 'recordType', 'recordCode', 'name', 'location', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'isPublic', 'ownerName', 'recordType', 'recordCode', 'name', 'subtitle', 'location', 'relatedCode', 'areaHectares', 'details', 'latitude', 'longitude', 'createdAt', 'updatedAt']) &&
+                       isValidPublicFinca(incoming()) &&
+                       hasRole('caficultor');
+      allow update: if isSignedIn() && isValidId(fincaId) &&
+                       isValidPublicFinca(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['ownerName', 'recordType', 'recordCode', 'name', 'subtitle', 'location', 'relatedCode', 'areaHectares', 'details', 'latitude', 'longitude', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isSignedIn() && isValidId(fincaId) && existing().userId == request.auth.uid && hasRole('caficultor');
+    }
+
+    match /cultivos/{cultivoId} {
+      allow get: if isSignedIn() && isValidId(cultivoId) && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(cultivoId) &&
+                       incoming().keys().hasAll(['userId', 'isPublic', 'recordCode', 'activityType', 'name', 'farmCode', 'date', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'isPublic', 'authorName', 'recordCode', 'activityType', 'name', 'farmId', 'farmCode', 'farmName', 'date', 'startTime', 'endTime', 'quantity', 'details', 'createdAt', 'updatedAt']) &&
+                       isValidPublicCultivo(incoming()) &&
+                       hasRole('caficultor') &&
+                       (!('farmId' in incoming()) || incoming().farmId.size() == 0 ||
+                        (exists(/databases/$(database)/documents/fincas/$(incoming().farmId)) &&
+                         get(/databases/$(database)/documents/fincas/$(incoming().farmId)).data.userId == request.auth.uid));
+      allow update: if isSignedIn() && isValidId(cultivoId) &&
+                       isValidPublicCultivo(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['authorName', 'activityType', 'name', 'farmId', 'farmCode', 'farmName', 'date', 'startTime', 'endTime', 'quantity', 'details', 'updatedAt']) &&
+                       hasRole('caficultor');
+      allow delete: if isSignedIn() && isValidId(cultivoId) && existing().userId == request.auth.uid && hasRole('caficultor');
+    }
+
+    match /visitas_agronomicas/{visitaId} {
+      allow get: if isSignedIn() && isValidId(visitaId) && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(visitaId) &&
+                       incoming().keys().hasAll(['userId', 'isPublic', 'recordCode', 'engineerName', 'diagnosis', 'date', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'isPublic', 'recordCode', 'engineerName', 'farmId', 'farmCode', 'farmName', 'farmOwnerId', 'farmOwnerName', 'location', 'date', 'diagnosis', 'activitiesPerformed', 'recommendations', 'createdAt', 'updatedAt']) &&
+                       isValidPublicVisita(incoming()) &&
+                       hasRole('agronomo') &&
+                       (!('farmId' in incoming()) || incoming().farmId.size() == 0 ||
+                        exists(/databases/$(database)/documents/fincas/$(incoming().farmId)));
+      allow update: if isSignedIn() && isValidId(visitaId) &&
+                       isValidPublicVisita(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['engineerName', 'farmId', 'farmCode', 'farmName', 'farmOwnerId', 'farmOwnerName', 'location', 'date', 'diagnosis', 'activitiesPerformed', 'recommendations', 'updatedAt']) &&
+                       hasRole('agronomo');
+      allow delete: if isSignedIn() && isValidId(visitaId) && existing().userId == request.auth.uid && hasRole('agronomo');
+    }
+
+    match /inquietudes/{inquietudId} {
+      allow get: if isSignedIn() && isValidId(inquietudId) && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(inquietudId) &&
+                       incoming().userId == request.auth.uid &&
+                       incoming().status == 'abierta' &&
+                       incoming().keys().hasAll(['userId', 'isPublic', 'recordCode', 'authorName', 'authorRole', 'subject', 'question', 'status', 'date', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'isPublic', 'recordCode', 'authorName', 'authorRole', 'farmId', 'farmCode', 'farmName', 'subject', 'question', 'status', 'date', 'replyText', 'replyByUid', 'replyByName', 'replyDate', 'createdAt', 'updatedAt']) &&
+                       isValidInquietud(incoming()) &&
+                       hasRole('caficultor') &&
+                       (!('farmId' in incoming()) || incoming().farmId.size() == 0 ||
+                        exists(/databases/$(database)/documents/fincas/$(incoming().farmId)));
+      allow update: if isSignedIn() && isValidId(inquietudId) &&
+                       isValidInquietud(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         (existing().userId == request.auth.uid &&
+                          hasRole('caficultor') &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['subject', 'question', 'farmId', 'farmCode', 'farmName', 'date', 'updatedAt'])) ||
+                         (hasRole('agronomo') &&
+                          incoming().status == 'respondida' &&
+                          ('replyByUid' in incoming()) && incoming().replyByUid == request.auth.uid &&
+                          ('replyText' in incoming()) && incoming().replyText is string && incoming().replyText.size() >= 2 &&
+                          ('replyByName' in incoming()) && incoming().replyByName is string && incoming().replyByName.size() >= 1 &&
+                          ('replyDate' in incoming()) && incoming().replyDate is string && incoming().replyDate.size() >= 1 &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['replyText', 'replyByUid', 'replyByName', 'replyDate', 'status', 'updatedAt']))
+                       );
+      allow delete: if isSignedIn() && isValidId(inquietudId) && existing().userId == request.auth.uid && hasRole('caficultor');
+    }
+
+    match /proveedores/{proveedorId} {
+      allow get: if isSignedIn() && isValidId(proveedorId) && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(proveedorId) &&
+                       incoming().keys().hasAll(['userId', 'isPublic', 'recordCode', 'name', 'productsServices', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'isPublic', 'ownerName', 'recordCode', 'name', 'category', 'productsServices', 'priceReference', 'commercialContact', 'location', 'details', 'latitude', 'longitude', 'createdAt', 'updatedAt']) &&
+                       isValidProveedor(incoming()) &&
+                       hasRole('proveedor');
+      allow update: if isSignedIn() && isValidId(proveedorId) &&
+                       isValidProveedor(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['ownerName', 'name', 'category', 'productsServices', 'priceReference', 'commercialContact', 'location', 'details', 'latitude', 'longitude', 'updatedAt']) &&
+                       hasRole('proveedor');
+      allow delete: if isSignedIn() && isValidId(proveedorId) && existing().userId == request.auth.uid && hasRole('proveedor');
+    }
+
+    match /compradores/{compradorId} {
+      allow get: if isSignedIn() && isValidId(compradorId) && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && (existing().isPublic == true || existing().userId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(compradorId) &&
+                       incoming().keys().hasAll(['userId', 'isPublic', 'actorType', 'recordCode', 'name', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'isPublic', 'actorType', 'recordCode', 'name', 'purchaseType', 'offerAmountCop', 'priceUnit', 'priceDate', 'location', 'details', 'latitude', 'longitude', 'createdAt', 'updatedAt']) &&
+                       isValidComprador(incoming()) &&
+                       hasRole('comprador');
+      allow update: if isSignedIn() && isValidId(compradorId) &&
+                       isValidComprador(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['actorType', 'name', 'purchaseType', 'offerAmountCop', 'priceUnit', 'priceDate', 'location', 'details', 'latitude', 'longitude', 'updatedAt']) &&
+                       hasRole('comprador');
+      allow delete: if isSignedIn() && isValidId(compradorId) && existing().userId == request.auth.uid && hasRole('comprador');
+    }
+  }
+}

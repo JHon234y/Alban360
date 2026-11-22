@@ -1,0 +1,341 @@
+{
+  "entities": {
+    "RoleCapabilities": {
+      "title": "RoleCapabilities",
+      "description": "Mapa de permisos estrictos derivados del rol bloqueado del usuario.",
+      "type": "object",
+      "properties": {
+        "manageOwnFarms": { "type": "boolean" },
+        "logOwnCropActivities": { "type": "boolean" },
+        "recordOwnHarvests": { "type": "boolean" },
+        "calculateOwnCosts": { "type": "boolean" },
+        "manageCollectors": { "type": "boolean" },
+        "createInquiries": { "type": "boolean" },
+        "registerAgronomyVisits": { "type": "boolean" },
+        "replyInquiries": { "type": "boolean" },
+        "publishProviderCatalog": { "type": "boolean" },
+        "publishBuyerPrices": { "type": "boolean" },
+        "recordCoffeePrices": { "type": "boolean" },
+        "viewCommunity": { "type": "boolean" }
+      },
+      "required": [
+        "manageOwnFarms",
+        "logOwnCropActivities",
+        "recordOwnHarvests",
+        "calculateOwnCosts",
+        "manageCollectors",
+        "createInquiries",
+        "registerAgronomyVisits",
+        "replyInquiries",
+        "publishProviderCatalog",
+        "publishBuyerPrices",
+        "recordCoffeePrices",
+        "viewCommunity"
+      ]
+    },
+    "RoleDefinition": {
+      "title": "RoleDefinition",
+      "description": "Catálogo de definición de roles del sistema (solo lectura para usuarios autenticados).",
+      "type": "object",
+      "properties": {
+        "roleId": { "type": "string", "enum": ["caficultor", "agronomo", "comprador", "proveedor"] },
+        "displayName": { "type": "string", "enum": ["Caficultor", "Ingeniero agrónomo", "Comprador", "Proveedor"] },
+        "aliasLabel": { "type": "string" },
+        "description": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "permissions": { "$ref": "#/entities/RoleCapabilities" }
+      },
+      "required": ["roleId", "displayName", "description", "isActive", "permissions"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil privado de usuario autenticado con nombre completo, celular, ubicación, rol permanente bloqueado y mapa de permisos.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID del usuario autenticado" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "location": { "type": "string" },
+        "roleId": { "type": "string", "enum": ["caficultor", "agronomo", "comprador", "proveedor"], "description": "Identificador inmutable del rol asignado al registrarse" },
+        "role": { "type": "string", "enum": ["Caficultor", "Ingeniero agrónomo", "Comprador", "Proveedor"] },
+        "roleLocked": { "type": "boolean", "description": "Siempre true: el rol no puede cambiarse tras el registro" },
+        "permissions": { "$ref": "#/entities/RoleCapabilities" },
+        "farmName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "fullName", "phone", "location", "roleId", "role", "roleLocked", "permissions", "createdAt", "updatedAt"]
+    },
+    "FincaProfile": {
+      "title": "FincaProfile",
+      "description": "Perfil trazable de finca cafetera o caficultor compartido en la comunidad (sin PII privada; solo propietario edita/elimina).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID del propietario" },
+        "isPublic": { "type": "boolean" },
+        "ownerName": { "type": "string", "description": "Nombre público del propietario o finca" },
+        "recordType": { "type": "string", "enum": ["finca", "caficultor"] },
+        "recordCode": { "type": "string", "description": "Código público único (ej. FIN-001)" },
+        "name": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "location": { "type": "string" },
+        "relatedCode": { "type": "string" },
+        "areaHectares": { "type": "number" },
+        "details": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "isPublic", "recordType", "recordCode", "name", "location", "createdAt", "updatedAt"]
+    },
+    "CosechaRecord": {
+      "title": "CosechaRecord",
+      "description": "Registro privado de kilaje recolectado por trabajador y finca.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "recordCode": { "type": "string" },
+        "workerName": { "type": "string" },
+        "farmCode": { "type": "string" },
+        "farmName": { "type": "string" },
+        "date": { "type": "string" },
+        "quantityKg": { "type": "number" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "recordCode", "workerName", "farmCode", "date", "quantityKg", "createdAt", "updatedAt"]
+    },
+    "CultivoActivity": {
+      "title": "CultivoActivity",
+      "description": "Actividad en bitácora de cultivo visible para la comunidad; solo el propietario de la finca puede crear, editar o eliminar.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "authorName": { "type": "string" },
+        "recordCode": { "type": "string" },
+        "activityType": { "type": "string", "enum": ["Siembra", "Abono", "Poda", "Control fitosanitario", "Cosecha"] },
+        "name": { "type": "string" },
+        "farmId": { "type": "string" },
+        "farmCode": { "type": "string" },
+        "farmName": { "type": "string" },
+        "date": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "quantity": { "type": "number" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "isPublic", "recordCode", "activityType", "name", "farmCode", "date", "createdAt", "updatedAt"]
+    },
+    "CostoCalculation": {
+      "title": "CostoCalculation",
+      "description": "Cálculo privado estructurado de costos de producción cafetera.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "recordCode": { "type": "string" },
+        "name": { "type": "string" },
+        "farmCode": { "type": "string" },
+        "farmName": { "type": "string" },
+        "date": { "type": "string" },
+        "estimatedKg": { "type": "number" },
+        "offerPricePerKg": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "lines": { "type": "array" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "recordCode", "name", "date", "estimatedKg", "totalAmount", "lines", "createdAt", "updatedAt"]
+    },
+    "VisitaAgronomica": {
+      "title": "VisitaAgronomica",
+      "description": "Registro público de visita de campo, observaciones, labores realizadas y recomendaciones del ingeniero agrónomo sobre cualquier finca.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID del ingeniero autor de la visita" },
+        "isPublic": { "type": "boolean" },
+        "recordCode": { "type": "string" },
+        "engineerName": { "type": "string" },
+        "farmId": { "type": "string" },
+        "farmCode": { "type": "string" },
+        "farmName": { "type": "string" },
+        "farmOwnerId": { "type": "string" },
+        "farmOwnerName": { "type": "string" },
+        "location": { "type": "string" },
+        "date": { "type": "string" },
+        "diagnosis": { "type": "string", "description": "Observaciones y diagnóstico en campo" },
+        "activitiesPerformed": { "type": "string", "description": "Qué se realizó durante la visita" },
+        "recommendations": { "type": "string", "description": "Comentarios y plan de recomendaciones" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "isPublic", "recordCode", "engineerName", "diagnosis", "date", "createdAt", "updatedAt"]
+    },
+    "InquietudTecnica": {
+      "title": "InquietudTecnica",
+      "description": "Consulta técnica de un caficultor sobre cultivo o finca, con respuesta directa de un ingeniero agrónomo.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "recordCode": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "farmId": { "type": "string" },
+        "farmCode": { "type": "string" },
+        "farmName": { "type": "string" },
+        "subject": { "type": "string" },
+        "question": { "type": "string" },
+        "status": { "type": "string", "enum": ["abierta", "respondida"] },
+        "date": { "type": "string" },
+        "replyText": { "type": "string" },
+        "replyByUid": { "type": "string" },
+        "replyByName": { "type": "string" },
+        "replyDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "isPublic", "recordCode", "authorName", "authorRole", "subject", "question", "status", "date", "createdAt", "updatedAt"]
+    },
+    "RecolectorPostulacion": {
+      "title": "RecolectorPostulacion",
+      "description": "Inscripción privada del trabajador para labores de recolección de café (con PII aislada al propietario).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "recordCode": { "type": "string" },
+        "contactName": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "contactPhone": { "type": "string" },
+        "location": { "type": "string" },
+        "experience": { "type": "string" },
+        "availability": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "recordCode", "contactName", "contactEmail", "contactPhone", "location", "experience", "availability", "createdAt", "updatedAt"]
+    },
+    "ProveedorItem": {
+      "title": "ProveedorItem",
+      "description": "Proveedor y catálogo de insumos o servicios cafeteros en el directorio compartido.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "ownerName": { "type": "string" },
+        "recordCode": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "productsServices": { "type": "string" },
+        "priceReference": { "type": "string" },
+        "commercialContact": { "type": "string" },
+        "location": { "type": "string" },
+        "details": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "isPublic", "recordCode", "name", "productsServices", "createdAt", "updatedAt"]
+    },
+    "CompradorItem": {
+      "title": "CompradorItem",
+      "description": "Punto de compraventa diaria de café con precio ofertado por unidad y geolocalización opcional.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "isPublic": { "type": "boolean" },
+        "actorType": { "type": "string", "enum": ["comprador", "vendedor"] },
+        "recordCode": { "type": "string" },
+        "name": { "type": "string" },
+        "purchaseType": { "type": "string" },
+        "offerAmountCop": { "type": "number" },
+        "priceUnit": { "type": "string" },
+        "priceDate": { "type": "string" },
+        "location": { "type": "string" },
+        "details": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "isPublic", "actorType", "recordCode", "name", "createdAt", "updatedAt"]
+    },
+    "PrecioCafeRecord": {
+      "title": "PrecioCafeRecord",
+      "description": "Registro diario privado en el historial de precios del café con referencia FNC/local, futuros de Nueva York (KC=F) y TRM USD/COP.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "recordCode": { "type": "string" },
+        "date": { "type": "string" },
+        "source": { "type": "string" },
+        "pricePerCargaCop": { "type": "number" },
+        "pricePerKgCop": { "type": "number" },
+        "nyFuturesCentsLb": { "type": "number" },
+        "usdCopTrm": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Servidor: FieldValue.serverTimestamp()" }
+      },
+      "required": ["userId", "recordCode", "date", "source", "pricePerCargaCop", "pricePerKgCop", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/roles/{roleId}": {
+      "schema": { "$ref": "#/entities/RoleDefinition" },
+      "description": "Catálogo de definición de roles activos del sistema (solo lectura para usuarios autenticados)."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Datos personales y contacto privados del usuario autenticado."
+    },
+    "/users/{userId}/cosechas/{cosechaId}": {
+      "schema": { "$ref": "#/entities/CosechaRecord" },
+      "description": "Registros privados de kilaje recolectado por trabajador."
+    },
+    "/users/{userId}/costos/{costoId}": {
+      "schema": { "$ref": "#/entities/CostoCalculation" },
+      "description": "Historial privado de cálculos de costos de producción."
+    },
+    "/users/{userId}/recolectores/{recolectorId}": {
+      "schema": { "$ref": "#/entities/RecolectorPostulacion" },
+      "description": "Inscripciones privadas de recolectores pertenecientes al usuario."
+    },
+    "/users/{userId}/precios_cafe/{precioId}": {
+      "schema": { "$ref": "#/entities/PrecioCafeRecord" },
+      "description": "Historial diario privado de precios del café, futuros NY y TRM."
+    },
+    "/fincas/{fincaId}": {
+      "schema": { "$ref": "#/entities/FincaProfile" },
+      "description": "Red compartida de fincas y caficultores: el propietario crea/edita y toda la comunidad consulta."
+    },
+    "/cultivos/{cultivoId}": {
+      "schema": { "$ref": "#/entities/CultivoActivity" },
+      "description": "Bitácora de cultivo compartida para visualización; solo el propietario de la finca registra o edita."
+    },
+    "/visitas_agronomicas/{visitaId}": {
+      "schema": { "$ref": "#/entities/VisitaAgronomica" },
+      "description": "Visitas técnicas registradas por ingenieros agrónomos sobre cualquier finca, visibles para todos."
+    },
+    "/inquietudes/{inquietudId}": {
+      "schema": { "$ref": "#/entities/InquietudTecnica" },
+      "description": "Inquietudes técnicas de la comunidad y respuestas de ingenieros agrónomos."
+    },
+    "/proveedores/{proveedorId}": {
+      "schema": { "$ref": "#/entities/ProveedorItem" },
+      "description": "Catálogo compartido de proveedores, insumos, precios y servicios cafeteros."
+    },
+    "/compradores/{compradorId}": {
+      "schema": { "$ref": "#/entities/CompradorItem" },
+      "description": "Puntos de compraventa de café y precios de compra diarios publicados."
+    }
+  }
+}
